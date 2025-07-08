@@ -1,0 +1,239 @@
+import tkinter as tk
+from tkinter import messagebox
+from tkcalendar import Calendar
+import datetime
+import json
+import os
+
+DATA_FILE = "user_data.json"
+SESSION_FILE = "session.json"
+
+def load_data():
+    if os.path.exists(DATA_FILE);
+        with open(DATA_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+def save_data(data):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def load_session():
+    if os.path.exists(SESSION_FILE):
+        with open(SESSION_FILE, 'r') as f:
+            return json.load(f)
+    return None
+
+def save_session(username):
+    with open(SESSION_FILE, 'w') as f:
+        json.dump({"username": username}, f)
+
+def clear_session():
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+
+# ---------- Signup ----------
+def signup():
+    name = signup_name.get().strip()
+    password = signup_pass.get().strip()
+
+    if not name or not password:
+        messagebox.showerror("Error", "Both fields are required.")
+        return
+
+    data = load_data()
+    if name in data:
+        messagebox.showerror("Error", "User already exists.")
+        return
+
+    data[name] = {
+        "password": password,
+        "period_dates": []
+    }
+    save_data(data)
+    messagebox.showinfo("Success", "Signup successful! Please log in.")
+    show_login()
+
+# ---------- Login ----------
+def login():
+    name = login_name.get().strip()
+    password = login_pass.get().strip()
+
+    data = load_data()
+    if name in data and data[name]["password"] == password:
+        save_session(name)
+        messagebox.showinfo("Success", f"Welcome back, {name}!")
+        show_tracker(name)
+    else:
+        messagebox.showerror("Error", "Invalid credentials.")
+
+# ---------- Logout ----------
+def logout():
+    clear_session()
+    messagebox.showinfo("Logged Out", "You have been logged out.")
+    show_login()
+
+# ---------- Tracker Logic ----------
+def calculate_avg_cycle(dates):
+    if len(dates) < 2:
+        return 28
+    sorted_dates = sorted(datetime.datetime.strptime(d, "%Y-%m-%d") for d in dates)
+    gaps = [(sorted_dates[i] - sorted_dates[i - 1]).days for i in range(1, len(sorted_dates))]
+    return round(sum(gaps) / len(gaps))
+
+def predict_next(dates, avg):
+    last_date = datetime.datetime.strptime(dates[-1], "%Y-%m-%d")
+    return last_date + datetime.timedelta(days=avg)
+
+def predict_ovulation(last_period):
+    last = datetime.datetime.strptime(last_period, "%Y-%m-%d")
+    return last + datetime.timedelta(days=14)
+
+def submit_period(name):
+    last_period = period_entry.get().strip()
+    try:
+        datetime.datetime.strptime(last_period, "%Y-%m-%d")
+
+        data = load_data()
+        data[name]["period_dates"].append(last_period)
+        data[name]["period_dates"] = sorted(list(set(data[name]["period_dates"])))
+
+        avg_cycle = calculate_avg_cycle(data[name]["period_dates"])
+        next_period = predict_next(data[name]["period_dates"], avg_cycle)
+        ovulation = predict_ovulation(last_period)
+
+        save_data(data)
+
+        result_lbl.config(
+            text=f"✅ Saved!\nAvg Cycle: {avg_cycle} days\nNext: {next_period.date()}\nOvulation: {ovulation.date()}",
+            fg="green"
+        )
+
+        show_calendar(data[name]["period_dates"], name)
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Invalid date format: YYYY-MM-DD\n\n{e}")
+
+# ---------- Calendar ----------
+def show_calendar(dates, username):
+    top = tk.Toplevel(app)
+    top.title("Period History")
+    today = datetime.date.today()
+
+    cal = Calendar(top, selectmode="none", year=today.year, month=today.month, day=today.day)
+    cal.pack(pady=10)
+
+    for d in dates:
+        cal.calevent_create(datetime.datetime.strptime(d, "%Y-%m-%d"), "Period", "period")
+
+    cal.tag_config("period", background="pink", foreground="black")
+
+    tk.Button(top, text="Add Previous Period Dates", command=lambda: open_calendar(username)).pack(pady=10)
+
+# ---------- Manual Entry via Calendar ----------
+def open_calendar(name):
+    top = tk.Toplevel(app)
+    top.title("Add Previous Period Dates")
+    cal = Calendar(top, selectmode="day")
+    cal.pack(pady=10)
+
+    selected_dates = []
+
+    def add_date():
+        date = cal.selection_get()
+        if date:
+            selected_dates.append(date.strftime("%Y-%m-%d"))
+            cal.calevent_create(date, "Period", "period")
+            cal.tag_config("period", background="pink", foreground="black")
+
+    def save_dates():
+        data = load_data()
+        data[name]["period_dates"] += selected_dates
+        data[name]["period_dates"] = sorted(list(set(data[name]["period_dates"])))
+        save_data(data)
+        messagebox.showinfo("Success", f"Added {len(selected_dates)} dates.")
+        top.destroy()
+
+    tk.Button(top, text="Add Selected Date", command=add_date).pack(pady=5)
+    tk.Button(top, text="Save Dates", command=save_dates).pack(pady=5)
+
+# ---------- UI Screens ----------
+def clear_frame():
+    for widget in app.winfo_children():
+        widget.destroy()
+
+def show_login():
+    clear_frame()
+    tk.Label(app, text="Login", font=("Arial", 16, "bold")).pack(pady=10)
+
+    tk.Label(app, text="Username").pack()
+    global login_name
+    login_name = tk.Entry(app)
+    login_name.pack()
+
+    tk.Label(app, text="Password").pack()
+    global login_pass
+    login_pass = tk.Entry(app, show="*")
+    login_pass.pack()
+
+    tk.Button(app, text="Login", command=login).pack(pady=10)
+    tk.Button(app, text="New here? Sign up", command=show_signup).pack()
+
+def show_signup():
+    clear_frame()
+    tk.Label(app, text="Sign Up", font=("Arial", 16, "bold")).pack(pady=10)
+
+    tk.Label(app, text="Username").pack()
+    global signup_name
+    signup_name = tk.Entry(app)
+    signup_name.pack()
+
+    tk.Label(app, text="Password").pack()
+    global signup_pass
+    signup_pass = tk.Entry(app, show="*")
+    signup_pass.pack()
+
+    tk.Button(app, text="Sign Up", command=signup).pack(pady=10)
+    tk.Button(app, text="Already have an account? Login", command=show_login).pack()
+
+def show_tracker(username):
+    clear_frame()
+    tk.Label(app, text=f"Welcome, {username}", font=("Arial", 14)).pack(pady=10)
+
+    tk.Label(app, text="Enter Last Period Start Date (YYYY-MM-DD):").pack()
+    global period_entry
+    period_entry = tk.Entry(app)
+    period_entry.pack()
+
+    tk.Button(app, text="Submit", command=lambda: submit_period(username)).pack(pady=10)
+
+    global result_lbl
+    result_lbl = tk.Label(app, text="", fg="green")
+    result_lbl.pack()
+
+    tk.Button(app, text="Add Previous Period Dates", command=lambda: open_calendar(username)).pack(pady=10)
+    tk.Button(app, text="Logout", command=logout).pack(pady=10)
+
+# ---------- Main ----------
+app = tk.Tk()
+app.title("Period Tracker")
+app.geometry("400x400")
+
+session = load_session()
+if session:
+    username = session.get("username")
+    data = load_data()
+    if username in data:
+        show_tracker(username)
+    else:
+        show_login()
+else:
+    show_login()
+
+app.mainloop()
+
+ 
+
+
+
+
